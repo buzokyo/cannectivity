@@ -30,13 +30,23 @@ config USBD_GS_USB_MAX_CHANNELS
 	  channel.
 
 config USBD_GS_USB_POOL_SIZE
-	int "Host frame buffer pool size"
+	int "RX host frame buffer pool size"
 	default 20 if !USBD_GS_USB_COMPATIBILITY_MODE
 	default 21 if USBD_GS_USB_COMPATIBILITY_MODE
 	help
-	  Size of the pool used for allocating Geschwister Schneider USB/CAN (gs_usb) host
-	  frames. The pool is used for both RX and TX, and shared between all channels of a given
-	  gs_usb instance.
+	  Size of the pool used for allocating Geschwister Schneider USB/CAN (gs_usb)
+	  receive/error host frames sent to the USB host. The pool is shared between all
+	  channels of a given gs_usb instance.
+
+config USBD_GS_USB_TX_POOL_SIZE
+	int "TX host frame buffer pool size"
+	default 16
+	range 2 256
+	help
+	  Size of the dedicated pool used for host-to-device frames received on bulk OUT.
+	  A buffer remains in this pool while it passes through the TX FIFO, CAN transmit,
+	  TX echo, and USB IN completion. Keeping this pool separate prevents CAN RX load
+	  from starving the bulk OUT endpoint re-arm path.
 
 config USBD_GS_USB_IDENTIFICATION
 	bool "Enable support for CAN channel identification"

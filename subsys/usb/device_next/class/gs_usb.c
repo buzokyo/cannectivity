@@ -24,6 +24,30 @@ LOG_MODULE_REGISTER(gs_usb, CONFIG_USBD_GS_USB_LOG_LEVEL);
 /* USB class instance state flag bits */
 #define GS_USB_STATE_CLASS_ENABLED 0U
 
+/* PROJECT YFA diagnostic-only interface vendor request. */
+#define GS_USB_REQUEST_YFA_DIAG 0xf0U
+#define GS_USB_YFA_DIAG_MAGIC 0x59464131U /* "YFA1" */
+#define GS_USB_YFA_DIAG_VERSION 1U
+#define GS_USB_YFA_BUILD_ID 2U
+#define GS_USB_YFA_FLAGS 0x0000000FU
+
+struct gs_usb_yfa_diag {
+	uint32_t magic;
+	uint32_t version;
+	uint32_t build_id;
+	uint32_t flags;
+	uint32_t out2_arm_ok;
+	uint32_t out2_arm_fail_alloc;
+	uint32_t out2_arm_fail_enqueue;
+	uint32_t out2_complete_ok;
+	uint32_t out2_complete_error;
+	uint32_t tx_fifo_frames;
+	uint32_t can_tx_submit_ok;
+	uint32_t can_tx_submit_error;
+	uint32_t can_tx_complete_ok;
+	uint32_t can_tx_complete_error;
+} __packed;
+
 struct gs_usb_desc {
 	struct usb_if_descriptor if0;
 	struct usb_ep_descriptor if0_in_ep;
@@ -49,6 +73,7 @@ struct gs_usb_config {
 	const struct usb_desc_header **fs_desc;
 	const struct usb_desc_header **hs_desc;
 	struct net_buf_pool *pool;
+	struct net_buf_pool *tx_pool;
 	struct usbd_desc_node *if0_str_desc;
 };
 
@@ -83,6 +108,18 @@ struct gs_usb_data {
 
 	struct k_fifo tx_fifo;
 	struct k_thread tx_thread;
+
+	/* PROJECT YFA diagnostic counters. */
+	atomic_t diag_out2_arm_ok;
+	atomic_t diag_out2_arm_fail_alloc;
+	atomic_t diag_out2_arm_fail_enqueue;
+	atomic_t diag_out2_complete_ok;
+	atomic_t diag_out2_complete_error;
+	atomic_t diag_tx_fifo_frames;
+	atomic_t diag_can_tx_submit_ok;
+	atomic_t diag_can_tx_submit_error;
+	atomic_t diag_can_tx_complete_ok;
+	atomic_t diag_can_tx_complete_error;
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_USBD_GS_USB_RX_THREAD_STACK_SIZE);
 	K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_USBD_GS_USB_TX_THREAD_STACK_SIZE);
@@ -709,6 +746,40 @@ static int gs_usb_request_timestamp(const struct device *dev, struct net_buf *bu
 #endif /* !CONFIG_USBD_GS_USB_TIMESTAMP */
 }
 
+static int gs_usb_request_yfa_diag(const struct device *dev, struct net_buf *const buf)
+{
+	struct gs_usb_data *data = dev->data;
+	struct gs_usb_yfa_diag diag;
+
+	diag.magic = sys_cpu_to_le32(GS_USB_YFA_DIAG_MAGIC);
+	diag.version = sys_cpu_to_le32(GS_USB_YFA_DIAG_VERSION);
+	diag.build_id = sys_cpu_to_le32(GS_USB_YFA_BUILD_ID);
+	diag.flags = sys_cpu_to_le32(GS_USB_YFA_FLAGS);
+	diag.out2_arm_ok =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_out2_arm_ok));
+	diag.out2_arm_fail_alloc =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_out2_arm_fail_alloc));
+	diag.out2_arm_fail_enqueue =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_out2_arm_fail_enqueue));
+	diag.out2_complete_ok =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_out2_complete_ok));
+	diag.out2_complete_error =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_out2_complete_error));
+	diag.tx_fifo_frames =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_tx_fifo_frames));
+	diag.can_tx_submit_ok =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_can_tx_submit_ok));
+	diag.can_tx_submit_error =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_can_tx_submit_error));
+	diag.can_tx_complete_ok =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_can_tx_complete_ok));
+	diag.can_tx_complete_error =
+		sys_cpu_to_le32((uint32_t)atomic_get(&data->diag_can_tx_complete_error));
+
+	net_buf_add_mem(buf, &diag, sizeof(diag));
+	return 0;
+}
+
 static int gs_usb_control_to_dev(struct usbd_class_data *const c_data,
 				 const struct usb_setup_packet *const setup,
 				 const struct net_buf *const buf)
@@ -793,6 +864,9 @@ static int gs_usb_control_to_host(struct usbd_class_data *const c_data,
 	case GS_USB_REQUEST_GET_STATE:
 		errno = gs_usb_request_get_state(dev, ch, buf);
 		break;
+	case GS_USB_REQUEST_YFA_DIAG:
+		errno = gs_usb_request_yfa_diag(dev, buf);
+		break;
 	default:
 		LOG_ERR("control_to_host: bmRequestType 0x%02x bRequest 0x%02x not supported",
 			setup->bmRequestType, setup->bRequest);
@@ -872,6 +946,22 @@ static struct net_buf *gs_usb_buf_alloc(const struct gs_usb_config *config, uint
 	return buf;
 }
 
+static struct net_buf *gs_usb_tx_buf_alloc(const struct gs_usb_config *config, uint8_t ep)
+{
+	struct udc_buf_info *bi;
+	struct net_buf *buf = NULL;
+
+	buf = net_buf_alloc_fixed(config->tx_pool, K_NO_WAIT);
+	if (buf == NULL) {
+		return NULL;
+	}
+
+	bi = udc_get_buf_info(buf);
+	bi->ep = ep;
+
+	return buf;
+}
+
 static void gs_usb_fill_echo_frame_hdr(struct net_buf *buf, uint32_t echo_id, uint8_t channel,
 				       uint8_t flags, uint8_t ep)
 {
@@ -905,19 +995,27 @@ static int gs_usb_out_start(struct usbd_class_data *const c_data, uint8_t ep)
 		return -EPERM;
 	}
 
-	buf = gs_usb_buf_alloc(config, ep);
+	buf = gs_usb_tx_buf_alloc(config, ep);
 	if (buf == NULL) {
+		if (ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+			atomic_inc(&data->diag_out2_arm_fail_alloc);
+		}
 		LOG_ERR("failed to allocate buffer for OUT ep 0x%02x", ep);
 		return -ENOMEM;
 	}
 
 	ret = usbd_ep_enqueue(c_data, buf);
 	if (ret != 0) {
+		if (ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+			atomic_inc(&data->diag_out2_arm_fail_enqueue);
+		}
 		LOG_ERR("failed to enqueue buffer for OUT ep 0x%02x (err %d)", ep, ret);
 		net_buf_unref(buf);
+	} else if (ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+		atomic_inc(&data->diag_out2_arm_ok);
 	}
 
-	return  ret;
+	return ret;
 }
 
 static void gs_usb_can_state_change_callback(const struct device *can_dev, enum can_state state,
@@ -1168,11 +1266,14 @@ static void gs_usb_can_tx_callback(const struct device *can_dev, int error, void
 	uint8_t *tail;
 
 	if (error != 0) {
+		atomic_inc(&data->diag_can_tx_complete_error);
 		/* There is no way to report a dropped frame to the host driver */
 		LOG_ERR("failed to send CAN frame (err %d)", error);
 		net_buf_unref(buf);
 		return;
 	}
+
+	atomic_inc(&data->diag_can_tx_complete_ok);
 
 #ifdef CONFIG_USBD_GS_USB_TIMESTAMP
 	uint32_t timestamp = 0U;
@@ -1293,9 +1394,12 @@ static void gs_usb_tx_thread(void *p1, void *p2, void *p3)
 
 		err = can_send(channel->dev, &frame, K_FOREVER, gs_usb_can_tx_callback, buf);
 		if (err != 0) {
+			atomic_inc(&data->diag_can_tx_submit_error);
 			/* There is no way to report a dropped frame to the host driver */
 			LOG_ERR("failed to enqueue CAN frame for TX (err %d)", err);
 			net_buf_unref(buf);
+		} else {
+			atomic_inc(&data->diag_can_tx_submit_ok);
 		}
 	}
 }
@@ -1308,6 +1412,9 @@ static int gs_usb_request(struct usbd_class_data *const c_data, struct net_buf *
 	int ret;
 
 	if (err != 0) {
+		if (bi->ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+			atomic_inc(&data->diag_out2_complete_error);
+		}
 		if (err == -ECONNABORTED) {
 			LOG_WRN("request cancelled for ep 0x%02x (err %d)", bi->ep, err);
 		} else {
@@ -1326,6 +1433,9 @@ static int gs_usb_request(struct usbd_class_data *const c_data, struct net_buf *
 #else /* CONFIG_USBD_GS_USB_COMPATIBILITY_MODE */
 	if (bi->ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
 #endif /* CONFIG_USBD_GS_USB_COMPATIBILITY_MODE */
+		if (bi->ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+			atomic_inc(&data->diag_out2_complete_ok);
+		}
 		if (!atomic_test_bit(&data->state, GS_USB_STATE_CLASS_ENABLED)) {
 			LOG_WRN("class not enabled");
 			net_buf_unref(buf);
@@ -1333,6 +1443,9 @@ static int gs_usb_request(struct usbd_class_data *const c_data, struct net_buf *
 		}
 
 		k_fifo_put(&data->tx_fifo, buf);
+		if (bi->ep == gs_usb_get_bulk_out2_ep_addr(c_data)) {
+			atomic_inc(&data->diag_tx_fifo_frames);
+		}
 
 		ret = gs_usb_out_start(c_data, bi->ep);
 		if (ret != 0) {
@@ -1653,7 +1766,8 @@ static const struct usbd_cctx_vendor_req gs_usb_vendor_requests =
 			GS_USB_REQUEST_SET_TERMINATION,
 			GS_USB_REQUEST_GET_TERMINATION,
 #endif /* CONFIG_USBD_GS_USB_TERMINATION */
-			GS_USB_REQUEST_GET_STATE);
+			GS_USB_REQUEST_GET_STATE,
+			GS_USB_REQUEST_YFA_DIAG);
 /* clang-format on */
 
 struct usbd_class_api gs_usb_api = {
@@ -1768,6 +1882,9 @@ struct usbd_class_api gs_usb_api = {
 	UDC_BUF_POOL_DEFINE(gs_usb_pool_##n, CONFIG_USBD_GS_USB_POOL_SIZE,                         \
 				  GS_USB_HOST_FRAME_MAX_SIZE, sizeof(struct udc_buf_info), NULL);  \
                                                                                                    \
+	UDC_BUF_POOL_DEFINE(gs_usb_tx_pool_##n, CONFIG_USBD_GS_USB_TX_POOL_SIZE,                   \
+				  GS_USB_HOST_FRAME_MAX_SIZE, sizeof(struct udc_buf_info), NULL);  \
+                                                                                                   \
 	IF_ENABLED(DT_INST_NODE_HAS_PROP(n, label), (                                              \
 			USBD_DESC_STRING_DEFINE(gs_usb_if0_str_desc_##n,                           \
 						DT_INST_PROP(n, label),                            \
@@ -1780,6 +1897,7 @@ struct usbd_class_api gs_usb_api = {
 		IF_ENABLED(USBD_SUPPORTS_HIGH_SPEED, (                                             \
 		.hs_desc = gs_usb_hs_desc_##n,))                                                   \
 		.pool = &gs_usb_pool_##n,                                                          \
+		.tx_pool = &gs_usb_tx_pool_##n,                                                    \
 		IF_ENABLED(DT_INST_NODE_HAS_PROP(n, label), (                                      \
 			.if0_str_desc = &gs_usb_if0_str_desc_##n,))                                \
 	};                                                                                         \
