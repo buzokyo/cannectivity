@@ -53,6 +53,9 @@ int cannectivity_led_event(const struct device *dev, uint16_t ch, enum gs_usb_ev
  */
 int cannectivity_led_init(void);
 
+
+bool cannectivity_user_led_get_disabled(void);
+int cannectivity_user_led_set_disabled(bool disabled);
 /**
  * @brief CANnectivity CAN channel set CAN bus termination callback
  *

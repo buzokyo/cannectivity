@@ -7,6 +7,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/smf.h>
 #include <zephyr/sys_clock.h>
@@ -112,6 +113,22 @@ static void led_tick(struct k_timer *timer);
 /* Variables */
 static K_TIMER_DEFINE(led_tick_timer, led_tick, NULL);
 
+
+static atomic_t user_led_disabled;
+
+bool cannectivity_user_led_get_disabled(void)
+{
+        return atomic_get(&user_led_disabled) != 0;
+}
+
+static int led_set_output(struct led_ctx *lctx, struct led_dt_spec *led, bool state)
+{
+        if (led == &lctx->state_led && cannectivity_user_led_get_disabled()) {
+                state = false;
+        }
+
+        return state ? led_on_dt(led) : led_off_dt(led);
+}
 static int led_event_enqueue(uint16_t ch, led_event_t event)
 {
 	struct led_ctx *lctx;
@@ -133,15 +150,11 @@ static int led_event_enqueue(uint16_t ch, led_event_t event)
 
 static void led_indicate_state(struct led_ctx *lctx, bool state)
 {
-	int err;
+        int err;
 
-	if (LED_CTX_HAS_STATE_LED(lctx)) {
-		if (state) {
-			err = led_on_dt(&lctx->state_led);
-		} else {
-			err = led_off_dt(&lctx->state_led);
-		}
-		if (err != 0) {
+        if (LED_CTX_HAS_STATE_LED(lctx)) {
+                err = led_set_output(lctx, &lctx->state_led, state);
+                if (err != 0) {
 			LOG_ERR("failed to turn %s channel %u state LED (err %d)",
 				state ? "on" : "off", lctx->ch, err);
 		}
@@ -198,16 +211,37 @@ static void led_indicate_activity(struct led_ctx *lctx, enum led_activity type, 
 	}
 
 	if (led != NULL) {
-		if (value) {
-			err = led_on_dt(led);
-		} else {
-			err = led_off_dt(led);
-		}
+		err = led_set_output(lctx, led, value);
 		if (err != 0) {
 			LOG_ERR("failed to turn %s channel %u activity LED (err %d)",
 				value ? "on" : "off", lctx->ch, err);
 		}
 	}
+}
+
+int cannectivity_user_led_set_disabled(bool disabled)
+{
+        struct led_ctx *lctx;
+        uint16_t ch;
+        int err = 0;
+        int ret;
+
+        atomic_set(&user_led_disabled, disabled ? 1 : 0);
+
+        for (ch = 0; ch < ARRAY_SIZE(led_channel_ctx); ch++) {
+                lctx = &led_channel_ctx[ch];
+                if (!LED_CTX_HAS_STATE_LED(lctx)) {
+                        continue;
+                }
+
+                ret = disabled ? led_off_dt(&lctx->state_led) :
+                                 led_set_output(lctx, &lctx->state_led, lctx->started);
+                if (ret != 0 && err == 0) {
+                        err = ret;
+                }
+        }
+
+        return err;
 }
 
 static enum smf_state_result led_state_normal_run(void *obj)
@@ -340,7 +374,7 @@ static enum smf_state_result led_state_identify_run(void *obj)
 		if (lctx->identify_ticks == LED_TICKS_IDENTIFY / 2U) {
 			for (i = 0; i < ARRAY_SIZE(leds); i++) {
 				if (leds[i]->dev != NULL) {
-					err = led_off_dt(leds[i]);
+					err = led_set_output(lctx, leds[i], false);
 					if (err != 0) {
 						LOG_ERR("failed to turn channel %u LED %d off"
 							"(err %d)", lctx->ch, i, err);
@@ -350,7 +384,7 @@ static enum smf_state_result led_state_identify_run(void *obj)
 		} else if (lctx->identify_ticks == 0U) {
 			for (i = 0; i < ARRAY_SIZE(leds); i++) {
 				if (leds[i]->dev != NULL) {
-					err = led_on_dt(leds[i]);
+					err = led_set_output(lctx, leds[i], true);
 					if (err != 0) {
 						LOG_ERR("failed to turn channel %u LED %d on "
 							"(err %d)", lctx->ch, i, err);

@@ -26,10 +26,13 @@ LOG_MODULE_REGISTER(gs_usb, CONFIG_USBD_GS_USB_LOG_LEVEL);
 
 /* PROJECT YFA diagnostic-only interface vendor request. */
 #define GS_USB_REQUEST_YFA_DIAG 0xf0U
+#define GS_USB_REQUEST_YFA_GET_SETTINGS 0xf1U
+#define GS_USB_REQUEST_YFA_SET_SETTINGS 0xf2U
+#define GS_USB_YFA_SETTING_DISABLE_USER_LED BIT(0)
 #define GS_USB_YFA_DIAG_MAGIC 0x59464131U /* "YFA1" */
 #define GS_USB_YFA_DIAG_VERSION 1U
-#define GS_USB_YFA_BUILD_ID 2U
-#define GS_USB_YFA_FLAGS 0x0000000FU
+#define GS_USB_YFA_BUILD_ID 3U
+#define GS_USB_YFA_FLAGS 0x0000001FU
 
 struct gs_usb_yfa_diag {
 	uint32_t magic;
@@ -67,6 +70,17 @@ struct gs_usb_desc {
 	struct usb_desc_header nil_desc;
 };
 
+
+__weak bool cannectivity_user_led_get_disabled(void)
+{
+        return false;
+}
+
+__weak int cannectivity_user_led_set_disabled(bool disabled)
+{
+        (void)disabled;
+        return -ENOTSUP;
+}
 struct gs_usb_config {
 	struct gs_usb_desc *desc;
 	struct usbd_class_data *c_data;
@@ -780,6 +794,32 @@ static int gs_usb_request_yfa_diag(const struct device *dev, struct net_buf *con
 	return 0;
 }
 
+static int gs_usb_request_yfa_get_settings(struct net_buf *const buf)
+{
+        uint32_t flags = 0U;
+
+        if (cannectivity_user_led_get_disabled()) {
+                flags |= GS_USB_YFA_SETTING_DISABLE_USER_LED;
+        }
+
+        net_buf_add_le32(buf, flags);
+        return 0;
+}
+
+static int gs_usb_request_yfa_set_settings(const struct net_buf *const buf)
+{
+        uint32_t flags;
+
+        if (buf->len != sizeof(flags)) {
+                LOG_ERR("invalid length for YFA settings request (%d)", buf->len);
+                return -EINVAL;
+        }
+
+        flags = sys_get_le32(buf->data);
+        return cannectivity_user_led_set_disabled(
+                (flags & GS_USB_YFA_SETTING_DISABLE_USER_LED) != 0U);
+}
+
 static int gs_usb_control_to_dev(struct usbd_class_data *const c_data,
 				 const struct usb_setup_packet *const setup,
 				 const struct net_buf *const buf)
@@ -815,7 +855,10 @@ static int gs_usb_control_to_dev(struct usbd_class_data *const c_data,
 	case GS_USB_REQUEST_SET_TERMINATION:
 		errno = gs_usb_request_set_termination(dev, ch, buf);
 		break;
-	default:
+        case GS_USB_REQUEST_YFA_SET_SETTINGS:
+                errno = gs_usb_request_yfa_set_settings(buf);
+                break;
+        default:
 		LOG_ERR("control_to_dev: bmRequestType 0x%02x bRequest 0x%02x not supported",
 			setup->bmRequestType, setup->bRequest);
 		errno = -ENOTSUP;
@@ -867,7 +910,10 @@ static int gs_usb_control_to_host(struct usbd_class_data *const c_data,
 	case GS_USB_REQUEST_YFA_DIAG:
 		errno = gs_usb_request_yfa_diag(dev, buf);
 		break;
-	default:
+        case GS_USB_REQUEST_YFA_GET_SETTINGS:
+                errno = gs_usb_request_yfa_get_settings(buf);
+                break;
+        default:
 		LOG_ERR("control_to_host: bmRequestType 0x%02x bRequest 0x%02x not supported",
 			setup->bmRequestType, setup->bRequest);
 		errno = -ENOTSUP;
@@ -1767,7 +1813,9 @@ static const struct usbd_cctx_vendor_req gs_usb_vendor_requests =
 			GS_USB_REQUEST_GET_TERMINATION,
 #endif /* CONFIG_USBD_GS_USB_TERMINATION */
 			GS_USB_REQUEST_GET_STATE,
-			GS_USB_REQUEST_YFA_DIAG);
+			GS_USB_REQUEST_YFA_DIAG,
+                   GS_USB_REQUEST_YFA_GET_SETTINGS,
+                   GS_USB_REQUEST_YFA_SET_SETTINGS);
 /* clang-format on */
 
 struct usbd_class_api gs_usb_api = {
