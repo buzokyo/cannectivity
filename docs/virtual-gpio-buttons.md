@@ -36,3 +36,20 @@ Waveshare documents a Pico-compatible 40-pin header. Its XL2515 SPI CAN controll
 Reference: https://www.waveshare.com/wiki/RP2350-CAN and https://bridle.tiac-systems.net/doc/4.3/bridle/boards/waveshare/rp2350/doc/index.html
 
 No board overlay is enabled until the project's actual board target and existing pin assignments are verified.
+
+## Reconstructed Bridle build target
+
+Bridle's Waveshare RP2350-CAN documentation explicitly provides a CANnectivity firmware build using the Cortex-M33 target. Board naming depends on the Bridle version:
+
+- Bridle 4.3/4.4: `waveshare_rp2350_can/rp2350a/m33`
+- Current Bridle documentation: `waveshare_rp2350_can/rp2350a/m33_0`
+
+For a current Bridle workspace with the CANnectivity module checked out, build the opt-in GPIO feature using:
+
+```sh
+west build -b waveshare_rp2350_can/rp2350a/m33_0 -p always -d build/waveshare_rp2350_can cannectivity/app -- -DEXTRA_DTC_OVERLAY_FILE=overlays/waveshare-rp2350-can-buttons.overlay -DCONFIG_CANNECTIVITY_VIRTUAL_BUTTONS=y
+```
+
+**Important:** Zephyr Kconfig settings are not guaranteed to be accepted as `-DCONFIG_...` CMake arguments. Prefer a dedicated `.conf` overlay and `-DEXTRA_CONF_FILE=...` in actual builds. Check Bridle release and application configuration before using this example. UF2 output is typically under `build/waveshare_rp2350_can/zephyr/zephyr.uf2`.
+
+Official references: https://bridle.tiac-systems.net/doc/latest/bridle/boards/waveshare/rp2350_can/doc/index.html and https://bridle.tiac-systems.net/doc/4.3/bridle/boards/waveshare/rp2350/doc/index.html
