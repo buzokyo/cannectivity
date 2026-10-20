@@ -51,6 +51,9 @@ static uint8_t sequence;
 static uint16_t stable_samples;
 #define BUTTON_POLL_MS 10U
 #define BUTTON_STABLE_POLLS DIV_ROUND_UP(CONFIG_CANNECTIVITY_VIRTUAL_BUTTON_DEBOUNCE_MS, BUTTON_POLL_MS)
+/* Keep synthetic RX off the USB endpoint during channel bring-up. */
+#define BUTTON_STARTUP_SETTLE_MS 500U
+static int64_t channel_ready_at_ms;
 static bool initial_pending = true;
 static bool monitor_ready;
 static bool channel_running;
@@ -60,6 +63,7 @@ void cannectivity_virtual_buttons_channel_event(bool started)
     channel_running = started;
     if (started) {
         initial_pending = true;
+        channel_ready_at_ms = k_uptime_get() + BUTTON_STARTUP_SETTLE_MS;
     }
     if (monitor_ready) {
         (void)k_work_reschedule(&poll_work, K_NO_WAIT);
@@ -90,7 +94,8 @@ static void poll_buttons(struct k_work *work)
         stable_samples++;
     }
 
-    if (channel_running && stable_samples >= BUTTON_STABLE_POLLS &&
+    if (channel_running && k_uptime_get() >= channel_ready_at_ms &&
+        stable_samples >= BUTTON_STABLE_POLLS &&
         (sampled != stable_state || initial_pending)) {
         uint8_t payload[2] = {sampled, sequence};
         err = gs_usb_inject_rx(usb_dev, 0, 0x555, payload, sizeof(payload));
