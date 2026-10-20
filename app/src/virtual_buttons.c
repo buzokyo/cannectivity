@@ -13,18 +13,32 @@
 
 LOG_MODULE_REGISTER(virtual_buttons, CONFIG_CANNECTIVITY_LOG_LEVEL);
 
-#define BUTTON_ENTRY(n) IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(yfa_button##n)), \
-    (GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button##n), gpios),))
-/* Each alias points to a node with a gpios property, with GPIO_ACTIVE_LOW. */
+/* Aliases are indexed: yfa-button0 through yfa-button7. */
 static const struct gpio_dt_spec buttons[] = {
-    BUTTON_ENTRY(0)
-    BUTTON_ENTRY(1)
-    BUTTON_ENTRY(2)
-    BUTTON_ENTRY(3)
-    BUTTON_ENTRY(4)
-    BUTTON_ENTRY(5)
-    BUTTON_ENTRY(6)
-    BUTTON_ENTRY(7)
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button0))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button0), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button1))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button1), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button2))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button2), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button3))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button3), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button4))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button4), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button5))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button5), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button6))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button6), gpios),
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(yfa_button7))
+    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button7), gpios),
+#endif
 };
 #define BUTTON_COUNT ARRAY_SIZE(buttons)
 
