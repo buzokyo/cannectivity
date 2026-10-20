@@ -614,6 +614,10 @@ struct gs_usb_ops {
  * @param user_data User data to pass to the callback functions.
  * @return 0 on success, negative error number otherwise.
  */
+/** Queue a synthetic classic CAN RX frame to USB only; never transmits on CAN. */
+int gs_usb_inject_rx(const struct device *dev, uint8_t channel, uint16_t can_id,
+		     const uint8_t *payload, uint8_t dlc);
+
 int gs_usb_register(const struct device *dev, const struct device **channels, size_t nchannels,
 		    const struct gs_usb_ops *ops, void *user_data);
 
