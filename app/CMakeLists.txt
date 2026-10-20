@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 cmake_minimum_required(VERSION 3.13.1)
+# Tracked GPIO aliases must survive pristine builds. Kconfig values are not
+# available until Zephyr configuration, so include for this board unconditionally.
+if(BOARD MATCHES "^waveshare_rp2350_can")
+  list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/yfa_virtual_buttons.overlay")
+endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(cannectivity LANGUAGES C)
