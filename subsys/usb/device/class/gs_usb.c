@@ -20,6 +20,23 @@
 
 LOG_MODULE_REGISTER(gs_usb, CONFIG_USB_DEVICE_GS_USB_LOG_LEVEL);
 
+/* Project YFA interface vendor extension, shared with the newer USB stack. */
+#define GS_USB_REQUEST_YFA_GET_SETTINGS 0xf1U
+#define GS_USB_REQUEST_YFA_SET_SETTINGS 0xf2U
+#define GS_USB_YFA_SETTING_DISABLE_USER_LED BIT(0)
+
+__weak bool cannectivity_user_led_get_disabled(void)
+{
+	return false;
+}
+
+__weak int cannectivity_user_led_set_disabled(bool disabled)
+{
+	ARG_UNUSED(disabled);
+	return -ENOTSUP;
+}
+
+
 #define DT_DRV_COMPAT gs_usb
 
 /* USB endpoint indexes */
@@ -742,6 +759,14 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 				return gs_usb_request_get_termination(dev, ch, tlen, tdata);
 			case GS_USB_REQUEST_GET_STATE:
 				return gs_usb_request_get_state(dev, ch, tlen, tdata);
+			case GS_USB_REQUEST_YFA_GET_SETTINGS:
+				if (*tlen < sizeof(uint32_t)) {
+					return -EINVAL;
+				}
+				sys_put_le32(cannectivity_user_led_get_disabled() ?
+					     GS_USB_YFA_SETTING_DISABLE_USER_LED : 0U, *tdata);
+				*tlen = sizeof(uint32_t);
+				return 0;
 			default:
 				break;
 			}
@@ -763,6 +788,13 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 				break;
 			case GS_USB_REQUEST_SET_TERMINATION:
 				return gs_usb_request_set_termination(dev, ch, *tlen, *tdata);
+			case GS_USB_REQUEST_YFA_SET_SETTINGS:
+				if (*tlen != sizeof(uint32_t)) {
+					return -EINVAL;
+				}
+				return cannectivity_user_led_set_disabled(
+					(sys_get_le32(*tdata) &
+					 GS_USB_YFA_SETTING_DISABLE_USER_LED) != 0U);
 			default:
 				break;
 			}
