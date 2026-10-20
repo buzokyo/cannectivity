@@ -132,6 +132,6 @@ int cannectivity_dfu_led_on(void);
 int cannectivity_dfu_init(void);
 
 int cannectivity_virtual_buttons_init(const struct device *gs_usb);
-void cannectivity_virtual_buttons_channel_started(void);
+void cannectivity_virtual_buttons_channel_event(bool started);
 
 #endif /* CANNECTIVITY_APP_CANNECTIVITY_H_ */
