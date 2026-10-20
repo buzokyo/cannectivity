@@ -51,10 +51,14 @@ static uint8_t sequence;
 static uint8_t stable_samples;
 static bool initial_pending = true;
 static bool monitor_ready;
+static bool channel_running;
 
-void cannectivity_virtual_buttons_channel_started(void)
+void cannectivity_virtual_buttons_channel_event(bool started)
 {
-    initial_pending = true;
+    channel_running = started;
+    if (started) {
+        initial_pending = true;
+    }
     if (monitor_ready) {
         (void)k_work_reschedule(&poll_work, K_NO_WAIT);
     }
@@ -84,7 +88,8 @@ static void poll_buttons(struct k_work *work)
         stable_samples++;
     }
 
-    if (stable_samples >= 3 && (sampled != stable_state || initial_pending)) {
+    if (channel_running && stable_samples >= 3 &&
+        (sampled != stable_state || initial_pending)) {
         uint8_t payload[2] = {sampled, sequence};
         err = gs_usb_inject_rx(usb_dev, 0, 0x555, payload, sizeof(payload));
         if (err == 0) {
