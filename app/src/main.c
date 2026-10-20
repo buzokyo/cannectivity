@@ -30,8 +30,9 @@ static int cannectivity_gs_usb_event(const struct device *dev, uint16_t ch,
                                      enum gs_usb_event event, void *user_data)
 {
 #ifdef CONFIG_CANNECTIVITY_VIRTUAL_BUTTONS
-    if (ch == 0U && event == GS_USB_EVENT_CHANNEL_STARTED) {
-        cannectivity_virtual_buttons_channel_started();
+    if (ch == 0U && (event == GS_USB_EVENT_CHANNEL_STARTED ||
+                    event == GS_USB_EVENT_CHANNEL_STOPPED)) {
+        cannectivity_virtual_buttons_channel_event(event == GS_USB_EVENT_CHANNEL_STARTED);
     }
 #endif
 #ifdef CONFIG_CANNECTIVITY_LED
