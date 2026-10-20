@@ -48,7 +48,9 @@ static struct k_work_delayable poll_work;
 static uint8_t stable_state;
 static uint8_t last_sample;
 static uint8_t sequence;
-static uint8_t stable_samples;
+static uint16_t stable_samples;
+#define BUTTON_POLL_MS 10U
+#define BUTTON_STABLE_POLLS DIV_ROUND_UP(CONFIG_CANNECTIVITY_VIRTUAL_BUTTON_DEBOUNCE_MS, BUTTON_POLL_MS)
 static bool initial_pending = true;
 static bool monitor_ready;
 static bool channel_running;
@@ -73,7 +75,7 @@ static void poll_buttons(struct k_work *work)
     for (size_t i = 0; i < BUTTON_COUNT; ++i) {
         err = gpio_pin_get_dt(&buttons[i].gpio);
         if (err < 0) {
-            (void)k_work_reschedule(&poll_work, K_MSEC(10));
+            (void)k_work_reschedule(&poll_work, K_MSEC(BUTTON_POLL_MS));
             return;
         }
         if (err > 0) {
@@ -84,11 +86,11 @@ static void poll_buttons(struct k_work *work)
     if (sampled != last_sample) {
         last_sample = sampled;
         stable_samples = 0;
-    } else if (stable_samples < 3) {
+    } else if (stable_samples < BUTTON_STABLE_POLLS) {
         stable_samples++;
     }
 
-    if (channel_running && stable_samples >= 3 &&
+    if (channel_running && stable_samples >= BUTTON_STABLE_POLLS &&
         (sampled != stable_state || initial_pending)) {
         uint8_t payload[2] = {sampled, sequence};
         err = gs_usb_inject_rx(usb_dev, 0, 0x555, payload, sizeof(payload));
@@ -99,7 +101,7 @@ static void poll_buttons(struct k_work *work)
         }
     }
 
-    (void)k_work_reschedule(&poll_work, K_MSEC(10));
+    (void)k_work_reschedule(&poll_work, K_MSEC(BUTTON_POLL_MS));
 }
 
 int cannectivity_virtual_buttons_init(const struct device *gs_usb)
@@ -119,6 +121,6 @@ int cannectivity_virtual_buttons_init(const struct device *gs_usb)
     usb_dev = gs_usb;
     k_work_init_delayable(&poll_work, poll_buttons);
     monitor_ready = true;
-    (void)k_work_schedule(&poll_work, K_MSEC(10));
+    (void)k_work_schedule(&poll_work, K_MSEC(BUTTON_POLL_MS));
     return 0;
 }
