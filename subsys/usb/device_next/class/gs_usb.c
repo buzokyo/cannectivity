@@ -1237,6 +1237,59 @@ static void gs_usb_can_rx_callback(const struct device *can_dev, struct can_fram
 	k_fifo_put(&data->rx_fifo, buf);
 }
 
+/* Synthetic RX uses the same USB FIFO as hardware CAN RX. No CAN TX. */
+int gs_usb_inject_rx(const struct device *dev, uint16_t ch, uint32_t can_id,
+		     const uint8_t *payload, size_t len)
+{
+	struct gs_usb_data *data;
+	const struct gs_usb_config *config;
+	struct gs_usb_channel_data *channel;
+	struct gs_usb_host_frame_hdr hdr = {0};
+	struct net_buf *buf;
+	uint32_t timestamp = 0U;
+	int err;
+
+	if (dev == NULL || payload == NULL || len > 8U || can_id > 0x7ffU) {
+		return -EINVAL;
+	}
+	data = dev->data;
+	config = dev->config;
+	if (ch >= data->nchannels) {
+		return -EINVAL;
+	}
+	channel = &data->channels[ch];
+	if (!channel->started) {
+		return -ENETDOWN;
+	}
+	buf = gs_usb_buf_alloc(config, gs_usb_get_bulk_in_ep_addr(config->c_data));
+	if (buf == NULL) {
+		return -ENOMEM;
+	}
+	hdr.echo_id = GS_USB_HOST_FRAME_ECHO_ID_RX_FRAME;
+	hdr.can_id = sys_cpu_to_le32(can_id);
+	hdr.can_dlc = can_bytes_to_dlc(len);
+	hdr.channel = ch;
+	net_buf_add_mem(buf, &hdr, sizeof(hdr));
+	/* Classic gs_usb transfers carry the complete 8-byte payload area. */
+	uint8_t bytes[8] = {0};
+	memcpy(bytes, payload, len);
+	net_buf_add_mem(buf, bytes, sizeof(bytes));
+#ifdef CONFIG_USBD_GS_USB_TIMESTAMP
+	if ((channel->mode & GS_USB_CAN_MODE_HW_TIMESTAMP) != 0U) {
+		if (data->ops.timestamp != NULL) {
+			err = data->ops.timestamp(dev, &timestamp, data->user_data);
+			if (err != 0) {
+				net_buf_unref(buf);
+				return err;
+			}
+		}
+		net_buf_add_le32(buf, timestamp);
+	}
+#endif
+	k_fifo_put(&data->rx_fifo, buf);
+	return 0;
+}
+
 static void gs_usb_rx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
