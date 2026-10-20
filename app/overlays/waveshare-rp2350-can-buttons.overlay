@@ -1,3 +1,5 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
 /*
  * Waveshare RP2350-CAN virtual button wiring example.
  * This is a reference overlay, not automatically selected by the build.
