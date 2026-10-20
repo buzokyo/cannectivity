@@ -634,4 +634,8 @@ int gs_usb_register(const struct device *dev, const struct device **channels, si
 }
 #endif
 
+/** Inject a USB-host-only classic CAN RX frame. Never sends on the CAN bus. */
+int gs_usb_inject_rx(const struct device *dev, uint16_t ch, uint32_t can_id,
+		     const uint8_t *payload, size_t len);
+
 #endif /* CANNECTIVITY_INCLUDE_USB_CLASS_GS_USB_H_ */
