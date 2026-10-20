@@ -1122,6 +1122,7 @@ int gs_usb_inject_rx(const struct device *dev, uint8_t ch, uint16_t can_id,
 	struct gs_usb_data *data = dev->data;
 	const struct gs_usb_config *config = dev->config;
 	struct gs_usb_host_frame_hdr hdr = {0};
+	uint8_t bytes[8] = {0};
 	struct net_buf *buf;
 	uint8_t ep;
 #ifdef CONFIG_USBD_GS_USB_TIMESTAMP
@@ -1146,7 +1147,6 @@ int gs_usb_inject_rx(const struct device *dev, uint8_t ch, uint16_t can_id,
 	hdr.can_dlc = dlc;
 	hdr.channel = ch;
 	net_buf_add_mem(buf, &hdr, sizeof(hdr));
-	uint8_t bytes[8] = {0};
 	if (dlc != 0U) {
 		memcpy(bytes, payload, dlc);
 	}
