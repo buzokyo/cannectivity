@@ -7,6 +7,15 @@ module = CANNECTIVITY
 module-str = CANnectivity
 source "subsys/logging/Kconfig.template.log_config"
 
+config CANNECTIVITY_VIRTUAL_BUTTONS
+	bool "USB-only virtual CAN frames from GPIO buttons"
+	select GPIO
+	default n
+	help
+	  Poll up to eight active-low GPIO buttons and report state changes
+	  to the USB host using standard CAN identifier 0x555.
+	  Frames are never transmitted onto the physical CAN bus.
+
 config CANNECTIVITY_BOOT_BANNER
 	bool "CANnectivity boot banner"
 	default y if BOOT_BANNER
