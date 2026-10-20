@@ -50,10 +50,14 @@ static uint8_t last_sample;
 static uint8_t sequence;
 static uint8_t stable_samples;
 static bool initial_pending = true;
+static bool monitor_ready;
 
 void cannectivity_virtual_buttons_channel_started(void)
 {
     initial_pending = true;
+    if (monitor_ready) {
+        (void)k_work_reschedule(&poll_work, K_NO_WAIT);
+    }
 }
 
 static void poll_buttons(struct k_work *work)
@@ -109,5 +113,7 @@ int cannectivity_virtual_buttons_init(const struct device *gs_usb)
     }
     usb_dev = gs_usb;
     k_work_init_delayable(&poll_work, poll_buttons);
-    return k_work_schedule(&poll_work, K_MSEC(10)) < 0 ? -EIO : 0;
+    monitor_ready = true;
+    (void)k_work_schedule(&poll_work, K_MSEC(10));
+    return 0;
 }
