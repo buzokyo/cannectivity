@@ -16,6 +16,17 @@ config CANNECTIVITY_VIRTUAL_BUTTONS
 	  to the USB host using standard CAN identifier 0x555.
 	  Frames are never transmitted onto the physical CAN bus.
 
+config CANNECTIVITY_VIRTUAL_BUTTON_DEBOUNCE_MS
+    int "Virtual GPIO button debounce duration (ms)"
+    depends on CANNECTIVITY_VIRTUAL_BUTTONS
+    range 10 1000
+    default 50
+    help
+      Minimum time a sampled GPIO button state must remain unchanged
+      before a new USB-only virtual CAN button state is reported.
+      The GPIO polling interval is 10 ms. The effective debounce
+      threshold is rounded up to whole polling intervals.
+
 config CANNECTIVITY_BOOT_BANNER
 	bool "CANnectivity boot banner"
 	default y if BOOT_BANNER
