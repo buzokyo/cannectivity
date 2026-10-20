@@ -49,6 +49,16 @@ tests:
       - usb2canfdv1
       - usb2canfdv2
     build_only: true
+  app.cannectivity.virtual_buttons:
+    depends_on:
+      - can
+      - usbd
+      - gpio
+    integration_platforms:
+      - frdm_k64f
+    build_only: true
+    extra_configs:
+      - CONFIG_CANNECTIVITY_VIRTUAL_BUTTONS=y
   app.cannectivity.sof:
     depends_on:
       - can
