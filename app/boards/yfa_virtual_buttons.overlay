@@ -1,0 +1,29 @@
+/* Project YFA virtual USB-only buttons on Waveshare RP2350-CAN.
+ * GPIO inputs are active low; no physical CAN frames are transmitted.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        yfa-button0 = &yfa_button0;
+        yfa-button1 = &yfa_button1;
+        yfa-button2 = &yfa_button2;
+        yfa-button3 = &yfa_button3;
+        yfa-button4 = &yfa_button4;
+        yfa-button5 = &yfa_button5;
+        yfa-button6 = &yfa_button6;
+        yfa-button7 = &yfa_button7;
+    };
+
+    yfa_buttons: yfa-buttons {
+        compatible = "gpio-keys";
+        yfa_button0: button-0 { gpios = <&gpio0 16 GPIO_ACTIVE_LOW>; };
+        yfa_button1: button-1 { gpios = <&gpio0 17 GPIO_ACTIVE_LOW>; };
+        yfa_button2: button-2 { gpios = <&gpio0 18 GPIO_ACTIVE_LOW>; };
+        yfa_button3: button-3 { gpios = <&gpio0 19 GPIO_ACTIVE_LOW>; };
+        yfa_button4: button-4 { gpios = <&gpio0 20 GPIO_ACTIVE_LOW>; };
+        yfa_button5: button-5 { gpios = <&gpio0 21 GPIO_ACTIVE_LOW>; };
+        yfa_button6: button-6 { gpios = <&gpio0 22 GPIO_ACTIVE_LOW>; };
+        yfa_button7: button-7 { gpios = <&gpio0 26 GPIO_ACTIVE_LOW>; };
+    };
+};
