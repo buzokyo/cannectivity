@@ -101,6 +101,14 @@ int main(void)
 		}
 	}
 
+#ifdef CONFIG_CANNECTIVITY_VIRTUAL_BUTTONS
+	err = cannectivity_virtual_buttons_init(gs_usb);
+	if (err != 0) {
+		LOG_ERR("failed to initialize virtual buttons (err %d)", err);
+		return err;
+	}
+#endif
+
 	LOG_INF("CANnectivity firmware initialized with %u channel%s", ARRAY_SIZE(channels),
 		ARRAY_SIZE(channels) > 1 ? "s" : "");
 }
