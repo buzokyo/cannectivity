@@ -13,34 +13,35 @@
 
 LOG_MODULE_REGISTER(virtual_buttons, CONFIG_CANNECTIVITY_LOG_LEVEL);
 
-/* Aliases are indexed: yfa-button0 through yfa-button7. */
-static const struct gpio_dt_spec buttons[] = {
+struct virtual_button { struct gpio_dt_spec gpio; uint8_t bit; };
+static const struct virtual_button buttons[] = {
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button0))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button0), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button0), gpios), BIT(0) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button1))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button1), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button1), gpios), BIT(1) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button2))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button2), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button2), gpios), BIT(2) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button3))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button3), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button3), gpios), BIT(3) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button4))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button4), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button4), gpios), BIT(4) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button5))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button5), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button5), gpios), BIT(5) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button6))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button6), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button6), gpios), BIT(6) },
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(yfa_button7))
-    GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button7), gpios),
+    { GPIO_DT_SPEC_GET(DT_ALIAS(yfa_button7), gpios), BIT(7) },
 #endif
+    { {0}, 0 }, /* sentinel permits zero configured aliases */
 };
-#define BUTTON_COUNT ARRAY_SIZE(buttons)
+#define BUTTON_COUNT (ARRAY_SIZE(buttons) - 1)
 
 static const struct device *usb_dev;
 static struct k_work_delayable poll_work;
@@ -57,9 +58,9 @@ static void poll_buttons(struct k_work *work)
     ARG_UNUSED(work);
 
     for (size_t i = 0; i < BUTTON_COUNT; ++i) {
-        err = gpio_pin_get_dt(&buttons[i]);
+        err = gpio_pin_get_dt(&buttons[i].gpio);
         if (err > 0) {
-            sampled |= BIT(i);
+            sampled |= buttons[i].bit;
         }
     }
 
@@ -89,10 +90,10 @@ int cannectivity_virtual_buttons_init(const struct device *gs_usb)
         return -EINVAL;
     }
     for (size_t i = 0; i < BUTTON_COUNT; ++i) {
-        if (!gpio_is_ready_dt(&buttons[i])) {
+        if (!gpio_is_ready_dt(&buttons[i].gpio)) {
             return -ENODEV;
         }
-        int err = gpio_pin_configure_dt(&buttons[i], GPIO_INPUT | GPIO_PULL_UP);
+        int err = gpio_pin_configure_dt(&buttons[i].gpio, GPIO_INPUT | GPIO_PULL_UP);
         if (err != 0) {
             return err;
         }
