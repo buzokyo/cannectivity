@@ -105,8 +105,11 @@ int main(void)
 #ifdef CONFIG_CANNECTIVITY_VIRTUAL_BUTTONS
 		err = cannectivity_virtual_buttons_init(gs_usb);
 		if (err != 0) {
-			LOG_ERR("failed to initialize virtual buttons (err %d)", err);
-			return err;
+			/* Optional GPIO inputs must never prevent the primary USB/CAN
+			 * adapter from starting. The GPIO worker is only scheduled after
+			 * all pins have been configured successfully.
+			 */
+			LOG_ERR("virtual buttons unavailable (err %d); continuing USB/CAN startup", err);
 		}
 #endif
 	}
