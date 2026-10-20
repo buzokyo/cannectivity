@@ -51,6 +51,11 @@ static uint8_t sequence;
 static uint8_t stable_samples;
 static bool initial_pending = true;
 
+void cannectivity_virtual_buttons_channel_started(void)
+{
+    initial_pending = true;
+}
+
 static void poll_buttons(struct k_work *work)
 {
     uint8_t sampled = 0;
@@ -59,6 +64,10 @@ static void poll_buttons(struct k_work *work)
 
     for (size_t i = 0; i < BUTTON_COUNT; ++i) {
         err = gpio_pin_get_dt(&buttons[i].gpio);
+        if (err < 0) {
+            (void)k_work_reschedule(&poll_work, K_MSEC(10));
+            return;
+        }
         if (err > 0) {
             sampled |= buttons[i].bit;
         }
