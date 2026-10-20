@@ -4,6 +4,16 @@
 
 menu "CANnectivity"
 
+config CANNECTIVITY_VIRTUAL_BUTTONS
+	bool "Virtual CAN RX frames from GPIO buttons"
+	depends on GPIO
+	default n
+	help
+	  Read up to eight active-low button GPIO aliases (yfa-button0 through
+	  yfa-button7) and report changes as USB-only standard CAN 0x555 frames.
+	  Configure aliases in the board overlay; no physical CAN transmission.
+
+
 module = CANNECTIVITY
 module-str = CANnectivity
 source "subsys/logging/Kconfig.template.log_config"
