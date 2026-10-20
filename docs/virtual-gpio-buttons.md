@@ -28,3 +28,11 @@ Treat 0x555 as a device-local control frame in host applications; distinguish fr
 - Verify first state snapshot, press, release, multi-button state and sequence wrap.
 - Verify listen-only mode and observe the physical bus with a separate adapter: no 0x555 transmission.
 - Check that sustained high-rate CAN traffic still records without loss.
+
+## Waveshare RP2350-CAN proposed button pins
+
+Waveshare documents a Pico-compatible 40-pin header. Its XL2515 SPI CAN controller uses GPIO8–GPIO12; do not use those for buttons. Onboard functions also occupy GPIO23–GPIO25 and GPIO29. Proposed independent button inputs, **pending verification against the active firmware devicetree and schematic**, are GPIO16, GPIO17, GPIO18, GPIO19, GPIO20, GPIO21, GPIO22 and GPIO26. These correspond to Pico header pins 21, 22, 24, 25, 26, 27, 29 and 31 respectively. GPIO26 can also serve as an ADC input; do not use it simultaneously for another purpose.
+
+Reference: https://www.waveshare.com/wiki/RP2350-CAN and https://bridle.tiac-systems.net/doc/4.3/bridle/boards/waveshare/rp2350/doc/index.html
+
+No board overlay is enabled until the project's actual board target and existing pin assignments are verified.
