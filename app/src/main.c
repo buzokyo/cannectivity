@@ -26,13 +26,26 @@ LOG_MODULE_REGISTER(main, CONFIG_CANNECTIVITY_LOG_LEVEL);
 
 #define CHANNEL_CAN_CONTROLLER_DT_GET(node_id) DEVICE_DT_GET(DT_PHANDLE(node_id, can_controller))
 
+static int cannectivity_gs_usb_event(const struct device *dev, uint16_t ch,
+                                     enum gs_usb_event event, void *user_data)
+{
+#ifdef CONFIG_CANNECTIVITY_VIRTUAL_BUTTONS
+    if (ch == 0U && event == GS_USB_EVENT_CHANNEL_STARTED) {
+        cannectivity_virtual_buttons_channel_started();
+    }
+#endif
+#ifdef CONFIG_CANNECTIVITY_LED
+    return cannectivity_led_event(dev, ch, event, user_data);
+#else
+    return 0;
+#endif
+}
+
 static const struct gs_usb_ops gs_usb_ops = {
 #ifdef CONFIG_CANNECTIVITY_TIMESTAMP
 	.timestamp = cannectivity_timestamp_get,
 #endif
-#ifdef CONFIG_CANNECTIVITY_LED
-	.event = cannectivity_led_event,
-#endif
+	.event = cannectivity_gs_usb_event,
 #ifdef CONFIG_CANNECTIVITY_TERMINATION_GPIO
 	.set_termination = cannectivity_set_termination,
 	.get_termination = cannectivity_get_termination,
