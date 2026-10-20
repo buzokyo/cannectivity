@@ -1116,6 +1116,53 @@ static void gs_usb_can_state_change_callback_handler(const struct device *can_de
 	}
 }
 
+int gs_usb_inject_rx(const struct device *dev, uint8_t ch, uint16_t can_id,
+		     const uint8_t *payload, uint8_t dlc)
+{
+	struct gs_usb_data *data = dev->data;
+	const struct gs_usb_config *config = dev->config;
+	struct gs_usb_host_frame_hdr hdr = {0};
+	struct net_buf *buf;
+	uint8_t ep;
+#ifdef CONFIG_USBD_GS_USB_TIMESTAMP
+	uint32_t timestamp = 0U;
+#endif
+
+	if (ch >= data->nchannels || can_id > 0x7ffU || dlc > 8U ||
+	    (dlc != 0U && payload == NULL)) {
+		return -EINVAL;
+	}
+	if (!data->channels[ch].started ||
+	    !atomic_test_bit(&data->state, GS_USB_STATE_CLASS_ENABLED)) {
+		return -ENETDOWN;
+	}
+	ep = gs_usb_get_bulk_in_ep_addr(config->c_data);
+	buf = gs_usb_buf_alloc(config, ep);
+	if (buf == NULL) {
+		return -ENOMEM;
+	}
+	hdr.echo_id = GS_USB_HOST_FRAME_ECHO_ID_RX_FRAME;
+	hdr.can_id = sys_cpu_to_le32(can_id);
+	hdr.can_dlc = dlc;
+	hdr.channel = ch;
+	net_buf_add_mem(buf, &hdr, sizeof(hdr));
+	uint8_t bytes[8] = {0};
+	if (dlc != 0U) {
+		memcpy(bytes, payload, dlc);
+	}
+	net_buf_add_mem(buf, bytes, sizeof(bytes));
+#ifdef CONFIG_USBD_GS_USB_TIMESTAMP
+	if ((data->channels[ch].mode & GS_USB_CAN_MODE_HW_TIMESTAMP) != 0U) {
+		if (data->ops.timestamp != NULL) {
+			(void)data->ops.timestamp(dev, &timestamp, data->user_data);
+		}
+		net_buf_add_le32(buf, timestamp);
+	}
+#endif
+	k_fifo_put(&data->rx_fifo, buf);
+	return 0;
+}
+
 static void gs_usb_can_rx_callback(const struct device *can_dev, struct can_frame *frame,
 				   void *user_data)
 {
