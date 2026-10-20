@@ -47,9 +47,9 @@ Bridle's Waveshare RP2350-CAN documentation explicitly provides a CANnectivity f
 For a current Bridle workspace with the CANnectivity module checked out, build the opt-in GPIO feature using:
 
 ```sh
-west build -b waveshare_rp2350_can/rp2350a/m33_0 -p always -d build/waveshare_rp2350_can cannectivity/app -- -DEXTRA_DTC_OVERLAY_FILE=overlays/waveshare-rp2350-can-buttons.overlay -DCONFIG_CANNECTIVITY_VIRTUAL_BUTTONS=y
+west build -b waveshare_rp2350_can/rp2350a/m33_0 -p always -d build/waveshare_rp2350_can cannectivity/app -- -DEXTRA_DTC_OVERLAY_FILE=overlays/waveshare-rp2350-can-buttons.overlay -DEXTRA_CONF_FILE=overlays/virtual-buttons.conf
 ```
 
-**Important:** Zephyr Kconfig settings are not guaranteed to be accepted as `-DCONFIG_...` CMake arguments. Prefer a dedicated `.conf` overlay and `-DEXTRA_CONF_FILE=...` in actual builds. Check Bridle release and application configuration before using this example. UF2 output is typically under `build/waveshare_rp2350_can/zephyr/zephyr.uf2`.
+The command uses the included Kconfig fragment `app/overlays/virtual-buttons.conf`. Check the Bridle release and application configuration before building. UF2 output is typically under `build/waveshare_rp2350_can/zephyr/zephyr.uf2`.
 
 Official references: https://bridle.tiac-systems.net/doc/latest/bridle/boards/waveshare/rp2350_can/doc/index.html and https://bridle.tiac-systems.net/doc/4.3/bridle/boards/waveshare/rp2350/doc/index.html
