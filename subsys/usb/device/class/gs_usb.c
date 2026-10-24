@@ -107,6 +107,7 @@ static gs_usb_vendorcode_callback_t vendorcode_callback;
  */
 #define GS_USB_REQUEST_YFA_SET_FC 0xf3U
 #define GS_USB_REQUEST_YFA_GET_FC 0xf4U
+#define GS_USB_REQUEST_YFA_FC_STATS 0xf5U
 #define GS_USB_FC_RULES 8U
 struct yfa_fc_wire {
 	uint8_t slot, enabled, channel, flags;
@@ -121,6 +122,15 @@ struct yfa_fc_rule {
 };
 static struct yfa_fc_rule yfa_fc_rules[GS_USB_FC_RULES];
 static atomic_t yfa_fc_generation[CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS];
+/* USB 0xf5 returns these eight LE32 counters in declaration order.
+ * Counters are lifetime totals until firmware reboot and may wrap.
+ */
+enum yfa_fc_stat {
+	YFA_FC_MATCHES, YFA_FC_SUBMITTED, YFA_FC_RETRIES, YFA_FC_QUEUE_DROPS,
+	YFA_FC_TX_ERRORS, YFA_FC_SUBMIT_FAILURES, YFA_FC_STALE_DROPS,
+	YFA_FC_COMPLETION_ERRORS, YFA_FC_STAT_COUNT
+};
+static atomic_t yfa_fc_stats[YFA_FC_STAT_COUNT];
 static void yfa_fc_clear_channel(uint16_t channel)
 {
 	if (channel < CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS) {
@@ -190,9 +200,16 @@ static void yfa_fc_tx_callback(const struct device *dev, int error, void *user_d
 	ARG_UNUSED(dev);
 	ARG_UNUSED(user_data);
 	if (error) {
+		atomic_inc(&yfa_fc_stats[YFA_FC_COMPLETION_ERRORS]);
 		LOG_ERR("offloaded FC CAN TX failed (%d)", error);
 	}
 }
+/* Retry only transient mailbox contention and only within a short deadline.
+ * Unlike repeating an already accepted frame, an unsuccessful can_send()
+ * enqueue cannot create duplicate FC frames.
+ */
+#define YFA_FC_RETRY_WINDOW_US 3000
+#define YFA_FC_RETRY_SLEEP_US 100
 static void yfa_fc_worker(void *arg1, void *arg2, void *arg3)
 {
 	struct yfa_fc_job job;
@@ -203,15 +220,29 @@ static void yfa_fc_worker(void *arg1, void *arg2, void *arg3)
 		k_msgq_get(&yfa_fc_queue, &job, K_FOREVER);
 		if (job.channel >= ARRAY_SIZE(yfa_fc_generation) ||
 		    job.generation != (uint32_t)atomic_get(&yfa_fc_generation[job.channel])) {
+			atomic_inc(&yfa_fc_stats[YFA_FC_STALE_DROPS]);
 			continue;
 		}
-		/* Async completion, bounded enqueue. Never block this high-priority
-		 * worker behind a busy CAN TX mailbox.
-		 */
-		int err = can_send(job.can_dev, &job.frame, K_NO_WAIT,
-				   yfa_fc_tx_callback, NULL);
-		if (err) {
+		int64_t deadline = k_uptime_get() + 3;
+		for (;;) {
+			if (job.generation != (uint32_t)atomic_get(&yfa_fc_generation[job.channel])) {
+				atomic_inc(&yfa_fc_stats[YFA_FC_STALE_DROPS]);
+				break;
+			}
+			int err = can_send(job.can_dev, &job.frame, K_NO_WAIT,
+					   yfa_fc_tx_callback, NULL);
+			if (!err) {
+				atomic_inc(&yfa_fc_stats[YFA_FC_SUBMITTED]);
+				break;
+			}
+			if ((err == -EAGAIN || err == -EBUSY) && k_uptime_get() < deadline) {
+				atomic_inc(&yfa_fc_stats[YFA_FC_RETRIES]);
+				k_busy_wait(YFA_FC_RETRY_SLEEP_US);
+				continue;
+			}
+			atomic_inc(&yfa_fc_stats[YFA_FC_SUBMIT_FAILURES]);
 			LOG_ERR("offloaded FC enqueue failed (%d)", err);
+			break;
 		}
 	}
 }
@@ -253,7 +284,9 @@ static void yfa_fc_rx(const struct gs_usb_channel_data *channel,
 		job.frame.data[0] = 0x30U;
 		job.frame.data[1] = rule->block_size;
 		job.frame.data[2] = rule->stmin;
+		atomic_inc(&yfa_fc_stats[YFA_FC_MATCHES]);
 		if (k_msgq_put(&yfa_fc_queue, &job, K_NO_WAIT)) {
+			atomic_inc(&yfa_fc_stats[YFA_FC_QUEUE_DROPS]);
 			LOG_ERR("offloaded FC queue full");
 		}
 		break;
@@ -921,6 +954,13 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 				return gs_usb_request_get_termination(dev, ch, tlen, tdata);
 			case GS_USB_REQUEST_GET_STATE:
 				return gs_usb_request_get_state(dev, ch, tlen, tdata);
+			case GS_USB_REQUEST_YFA_FC_STATS:
+				for (size_t i = 0; i < YFA_FC_STAT_COUNT; i++) {
+					sys_put_le32((uint32_t)atomic_get(&yfa_fc_stats[i]),
+						     *tdata + 4 * i);
+				}
+				*tlen = 4 * YFA_FC_STAT_COUNT;
+				return 0;
 			case GS_USB_REQUEST_YFA_GET_FC:
 				/* IN control requests arrive with an output length of zero.
 				 * The handler sets the reply length; wLength is enforced
