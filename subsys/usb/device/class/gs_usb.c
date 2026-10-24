@@ -122,6 +122,9 @@ struct yfa_fc_rule {
 static struct yfa_fc_rule yfa_fc_rules[GS_USB_FC_RULES];
 static void yfa_fc_clear_channel(uint16_t channel)
 {
+	if (channel < CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS) {
+		atomic_inc(&yfa_fc_generation[channel]);
+	}
 	for (size_t i = 0; i < ARRAY_SIZE(yfa_fc_rules); ++i) {
 		if (yfa_fc_rules[i].channel == channel) {
 			atomic_clear(&yfa_fc_rules[i].enabled);
@@ -143,6 +146,7 @@ static int yfa_fc_configure(const struct device *dev, uint16_t ch, int32_t len,
 		return -EINVAL;
 	}
 	rule = &yfa_fc_rules[wire->slot];
+	atomic_inc(&yfa_fc_generation[ch]);
 	atomic_clear(&rule->enabled);
 	if (!wire->enabled) {
 		return 0;
@@ -164,12 +168,61 @@ static int yfa_fc_configure(const struct device *dev, uint16_t ch, int32_t len,
 	atomic_set(&rule->enabled, 1);
 	return 0;
 }
+/* One bounded queue shared by all configured channels. The CAN RX callback
+ * never enters the CAN driver transmit path. Drop on saturation rather than
+ * block reception; all offload remains explicitly host-controlled.
+ */
+#define YFA_FC_QUEUE_DEPTH 16
+struct yfa_fc_job {
+	const struct device *can_dev;
+	struct can_frame frame;
+	uint16_t channel;
+	uint32_t generation;
+};
+K_MSGQ_DEFINE(yfa_fc_queue, sizeof(struct yfa_fc_job), YFA_FC_QUEUE_DEPTH, 4);
+K_THREAD_STACK_DEFINE(yfa_fc_stack, 1024);
+static struct k_thread yfa_fc_thread_data;
+static atomic_t yfa_fc_generation[CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS];
+static atomic_t yfa_fc_worker_started;
+
 static void yfa_fc_tx_callback(const struct device *dev, int error, void *user_data)
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(user_data);
 	if (error) {
 		LOG_ERR("offloaded FC CAN TX failed (%d)", error);
+	}
+}
+static void yfa_fc_worker(void *arg1, void *arg2, void *arg3)
+{
+	struct yfa_fc_job job;
+	ARG_UNUSED(arg1);
+	ARG_UNUSED(arg2);
+	ARG_UNUSED(arg3);
+	for (;;) {
+		k_msgq_get(&yfa_fc_queue, &job, K_FOREVER);
+		if (job.channel >= ARRAY_SIZE(yfa_fc_generation) ||
+		    job.generation != (uint32_t)atomic_get(&yfa_fc_generation[job.channel])) {
+			continue;
+		}
+		/* Async completion, bounded enqueue. Never block this high-priority
+		 * worker behind a busy CAN TX mailbox.
+		 */
+		int err = can_send(job.can_dev, &job.frame, K_NO_WAIT,
+				   yfa_fc_tx_callback, NULL);
+		if (err) {
+			LOG_ERR("offloaded FC enqueue failed (%d)", err);
+		}
+	}
+}
+static void yfa_fc_worker_init(void)
+{
+	if (atomic_cas(&yfa_fc_worker_started, 0, 1)) {
+		k_tid_t tid = k_thread_create(&yfa_fc_thread_data, yfa_fc_stack,
+					 K_THREAD_STACK_SIZEOF(yfa_fc_stack),
+					 yfa_fc_worker, NULL, NULL, NULL,
+					 -1, 0, K_NO_WAIT);
+		k_thread_name_set(tid, "yfa_fc");
 	}
 }
 static void yfa_fc_rx(const struct gs_usb_channel_data *channel,
@@ -188,17 +241,20 @@ static void yfa_fc_rx(const struct gs_usb_channel_data *channel,
 		    !!(rule->flags & 1U) != !!(received->flags & CAN_FRAME_IDE)) {
 			continue;
 		}
-		/* Callback is asynchronous: no waiting for CAN TX in the RX callback. */
-		struct can_frame fc = { .id = rule->tx_id, .dlc = 8U };
+		struct yfa_fc_job job = {
+			.can_dev = channel->dev,
+			.channel = channel->ch,
+			.generation = (uint32_t)atomic_get(&yfa_fc_generation[channel->ch]),
+			.frame = { .id = rule->tx_id, .dlc = 8U },
+		};
 		if (rule->flags & 1U) {
-			fc.flags = CAN_FRAME_IDE;
+			job.frame.flags = CAN_FRAME_IDE;
 		}
-		fc.data[0] = 0x30U;
-		fc.data[1] = rule->block_size;
-		fc.data[2] = rule->stmin;
-		int err = can_send(channel->dev, &fc, K_NO_WAIT, yfa_fc_tx_callback, NULL);
-		if (err) {
-			LOG_ERR("offloaded FC enqueue failed (%d)", err);
+		job.frame.data[0] = 0x30U;
+		job.frame.data[1] = rule->block_size;
+		job.frame.data[2] = rule->stmin;
+		if (k_msgq_put(&yfa_fc_queue, &job, K_NO_WAIT)) {
+			LOG_ERR("offloaded FC queue full");
 		}
 		break;
 	}
@@ -1558,6 +1614,7 @@ int gs_usb_register(const struct device *dev, const struct device **channels, si
 
 	data->nchannels = nchannels;
 	data->user_data = user_data;
+	yfa_fc_worker_init();
 
 	common_features |= gs_usb_features_from_ops(&data->ops);
 
