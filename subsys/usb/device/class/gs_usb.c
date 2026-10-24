@@ -1041,7 +1041,6 @@ static void gs_usb_can_rx_callback(const struct device *can_dev, struct can_fram
 	struct net_buf *buf;
 
 	__ASSERT_NO_MSG(can_dev == channel->dev);
-	yfa_fc_rx(channel, frame);
 
 #ifdef CONFIG_USB_DEVICE_GS_USB_TIMESTAMP
 	uint32_t timestamp = 0U;
@@ -1054,6 +1053,9 @@ static void gs_usb_can_rx_callback(const struct device *can_dev, struct can_fram
 		}
 	}
 #endif /* CONFIG_USB_DEVICE_GS_USB_TIMESTAMP */
+
+	/* Capture RX timestamp before the optional local FC transmission. */
+	yfa_fc_rx(channel, frame);
 
 	buf = net_buf_alloc_fixed(data->pool, K_NO_WAIT);
 	if (buf == NULL) {
