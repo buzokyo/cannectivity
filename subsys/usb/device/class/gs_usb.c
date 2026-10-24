@@ -866,7 +866,10 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 			case GS_USB_REQUEST_GET_STATE:
 				return gs_usb_request_get_state(dev, ch, tlen, tdata);
 			case GS_USB_REQUEST_YFA_GET_FC:
-				if (*tlen < sizeof(uint32_t)) { return -EINVAL; }
+				/* IN control requests arrive with an output length of zero.
+				 * The handler sets the reply length; wLength is enforced
+				 * by the USB control transfer layer.
+				 */
 				sys_put_le32(GS_USB_FC_RULES, *tdata);
 				*tlen = sizeof(uint32_t);
 				return 0;
