@@ -127,7 +127,7 @@ static atomic_t yfa_fc_generation[CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS];
  */
 enum yfa_fc_stat {
 	YFA_FC_MATCHES, YFA_FC_SUBMITTED, YFA_FC_RETRIES, YFA_FC_QUEUE_DROPS,
-	YFA_FC_TX_ERRORS, YFA_FC_SUBMIT_FAILURES, YFA_FC_STALE_DROPS,
+	YFA_FC_SUBMIT_FAILURES, YFA_FC_STALE_DROPS,
 	YFA_FC_COMPLETION_ERRORS, YFA_FC_STAT_COUNT
 };
 static atomic_t yfa_fc_stats[YFA_FC_STAT_COUNT];
@@ -208,7 +208,6 @@ static void yfa_fc_tx_callback(const struct device *dev, int error, void *user_d
  * Unlike repeating an already accepted frame, an unsuccessful can_send()
  * enqueue cannot create duplicate FC frames.
  */
-#define YFA_FC_RETRY_WINDOW_US 3000
 #define YFA_FC_RETRY_SLEEP_US 100
 static void yfa_fc_worker(void *arg1, void *arg2, void *arg3)
 {
