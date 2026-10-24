@@ -1590,6 +1590,9 @@ static void gs_usb_status_callback(struct usb_cfg_data *cfg, enum usb_dc_status_
 		LOG_DBG("USB device error");
 		break;
 	case USB_DC_RESET:
+		for (ch = 0; ch < data->nchannels; ch++) {
+			yfa_fc_clear_channel(ch);
+		}
 		LOG_DBG("USB device reset");
 		break;
 	case USB_DC_CONNECTED:
@@ -1618,6 +1621,9 @@ static void gs_usb_status_callback(struct usb_cfg_data *cfg, enum usb_dc_status_
 		usb_cancel_transfer(cfg->endpoint[GS_USB_OUT2_EP_IDX].ep_addr);
 		break;
 	case USB_DC_SUSPEND:
+		for (ch = 0; ch < data->nchannels; ch++) {
+			yfa_fc_clear_channel(ch);
+		}
 		LOG_DBG("USB device suspend");
 		break;
 	case USB_DC_RESUME:
