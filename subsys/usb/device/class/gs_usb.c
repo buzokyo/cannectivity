@@ -98,6 +98,112 @@ struct gs_usb_data {
 static sys_slist_t gs_usb_data_devlist;
 static gs_usb_vendorcode_callback_t vendorcode_callback;
 
+/*
+ * Project YFA host-configured ISO-TP FC accelerator.
+ * The extension is inert after boot/reset; 0xf3 configures a slot,
+ * 0xf4 reports status. Each slot is independently configured by the host.
+ * Wire payload (16 bytes): slot, enable, channel, flags (bit0 IDE),
+ * RX identifier LE32, TX identifier LE32, block size, STmin, reserved[2].
+ */
+#define GS_USB_REQUEST_YFA_SET_FC 0xf3U
+#define GS_USB_REQUEST_YFA_GET_FC 0xf4U
+#define GS_USB_FC_RULES 8U
+struct yfa_fc_wire {
+	uint8_t slot, enabled, channel, flags;
+	uint32_t rx_id, tx_id;
+	uint8_t block_size, stmin, reserved[2];
+} __packed;
+struct yfa_fc_rule {
+	atomic_t enabled;
+	uint16_t channel;
+	uint32_t rx_id, tx_id;
+	uint8_t flags, block_size, stmin;
+};
+static struct yfa_fc_rule yfa_fc_rules[GS_USB_FC_RULES];
+static void yfa_fc_clear_channel(uint16_t channel)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(yfa_fc_rules); ++i) {
+		if (yfa_fc_rules[i].channel == channel) {
+			atomic_clear(&yfa_fc_rules[i].enabled);
+		}
+	}
+}
+static int yfa_fc_configure(const struct device *dev, uint16_t ch, int32_t len,
+			    const uint8_t *payload)
+{
+	struct gs_usb_data *data = dev->data;
+	const struct yfa_fc_wire *wire = (const void *)payload;
+	struct yfa_fc_rule *rule;
+	uint32_t rx_id, tx_id;
+
+	if (len != sizeof(*wire) || wire->slot >= GS_USB_FC_RULES ||
+	    wire->channel != ch || ch >= data->nchannels ||
+	    wire->flags > 1U || wire->enabled > 1U ||
+	    wire->reserved[0] || wire->reserved[1]) {
+		return -EINVAL;
+	}
+	rule = &yfa_fc_rules[wire->slot];
+	atomic_clear(&rule->enabled);
+	if (!wire->enabled) {
+		return 0;
+	}
+	rx_id = sys_get_le32((const uint8_t *)&wire->rx_id);
+	tx_id = sys_get_le32((const uint8_t *)&wire->tx_id);
+	if (rx_id > ((wire->flags & 1U) ? CAN_EXT_ID_MASK : CAN_STD_ID_MASK) ||
+	    tx_id > ((wire->flags & 1U) ? CAN_EXT_ID_MASK : CAN_STD_ID_MASK) ||
+	    !data->channels[ch].started ||
+	    (data->channels[ch].mode & (GS_USB_CAN_MODE_LISTEN_ONLY | GS_USB_CAN_MODE_LOOP_BACK))) {
+		return -EINVAL;
+	}
+	rule->channel = ch;
+	rule->rx_id = rx_id;
+	rule->tx_id = tx_id;
+	rule->flags = wire->flags;
+	rule->block_size = wire->block_size;
+	rule->stmin = wire->stmin;
+	atomic_set(&rule->enabled, 1);
+	return 0;
+}
+static void yfa_fc_tx_callback(const struct device *dev, int error, void *user_data)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+	if (error) {
+		LOG_ERR("offloaded FC CAN TX failed (%d)", error);
+	}
+}
+static void yfa_fc_rx(const struct gs_usb_channel_data *channel,
+		      const struct can_frame *received)
+{
+	if (!channel->started ||
+	    (channel->mode & (GS_USB_CAN_MODE_LISTEN_ONLY | GS_USB_CAN_MODE_LOOP_BACK)) ||
+	    (received->flags & (CAN_FRAME_RTR | CAN_FRAME_FDF)) ||
+	    received->dlc < 2U || (received->data[0] & 0xf0U) != 0x10U) {
+		return;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(yfa_fc_rules); ++i) {
+		const struct yfa_fc_rule *rule = &yfa_fc_rules[i];
+		if (!atomic_get(&rule->enabled) || rule->channel != channel->ch ||
+		    rule->rx_id != received->id ||
+		    !!(rule->flags & 1U) != !!(received->flags & CAN_FRAME_IDE)) {
+			continue;
+		}
+		/* Callback is asynchronous: no waiting for CAN TX in the RX callback. */
+		struct can_frame fc = { .id = rule->tx_id, .dlc = 8U };
+		if (rule->flags & 1U) {
+			fc.flags = CAN_FRAME_IDE;
+		}
+		fc.data[0] = 0x30U;
+		fc.data[1] = rule->block_size;
+		fc.data[2] = rule->stmin;
+		int err = can_send(channel->dev, &fc, K_NO_WAIT, yfa_fc_tx_callback, NULL);
+		if (err) {
+			LOG_ERR("offloaded FC enqueue failed (%d)", err);
+		}
+		break;
+	}
+}
+
 static void gs_usb_transfer_tx_prepare(const struct device *dev, uint8_t ep);
 static int gs_usb_reset_channel(const struct device *dev, uint16_t ch);
 
@@ -759,6 +865,11 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 				return gs_usb_request_get_termination(dev, ch, tlen, tdata);
 			case GS_USB_REQUEST_GET_STATE:
 				return gs_usb_request_get_state(dev, ch, tlen, tdata);
+			case GS_USB_REQUEST_YFA_GET_FC:
+				if (*tlen < sizeof(uint32_t)) { return -EINVAL; }
+				sys_put_le32(GS_USB_FC_RULES, *tdata);
+				*tlen = sizeof(uint32_t);
+				return 0;
 			case GS_USB_REQUEST_YFA_GET_SETTINGS:
 				if (*tlen < sizeof(uint32_t)) {
 					return -EINVAL;
@@ -788,6 +899,8 @@ static int gs_usb_vendor_request_handler(struct usb_setup_packet *setup, int32_t
 				break;
 			case GS_USB_REQUEST_SET_TERMINATION:
 				return gs_usb_request_set_termination(dev, ch, *tlen, *tdata);
+			case GS_USB_REQUEST_YFA_SET_FC:
+				return yfa_fc_configure(dev, ch, *tlen, *tdata);
 			case GS_USB_REQUEST_YFA_SET_SETTINGS:
 				if (*tlen != sizeof(uint32_t)) {
 					return -EINVAL;
@@ -928,6 +1041,7 @@ static void gs_usb_can_rx_callback(const struct device *can_dev, struct can_fram
 	struct net_buf *buf;
 
 	__ASSERT_NO_MSG(can_dev == channel->dev);
+	yfa_fc_rx(channel, frame);
 
 #ifdef CONFIG_USB_DEVICE_GS_USB_TIMESTAMP
 	uint32_t timestamp = 0U;
@@ -1353,6 +1467,7 @@ static int gs_usb_reset_channel(const struct device *dev, uint16_t ch)
 	}
 
 	channel = &data->channels[ch];
+	yfa_fc_clear_channel(ch);
 	channel->mode = GS_USB_CAN_MODE_NORMAL;
 	channel->started = false;
 	channel->busoff = false;
