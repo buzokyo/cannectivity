@@ -120,6 +120,7 @@ struct yfa_fc_rule {
 	uint8_t flags, block_size, stmin;
 };
 static struct yfa_fc_rule yfa_fc_rules[GS_USB_FC_RULES];
+static atomic_t yfa_fc_generation[CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS];
 static void yfa_fc_clear_channel(uint16_t channel)
 {
 	if (channel < CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS) {
@@ -182,7 +183,6 @@ struct yfa_fc_job {
 K_MSGQ_DEFINE(yfa_fc_queue, sizeof(struct yfa_fc_job), YFA_FC_QUEUE_DEPTH, 4);
 K_THREAD_STACK_DEFINE(yfa_fc_stack, 1024);
 static struct k_thread yfa_fc_thread_data;
-static atomic_t yfa_fc_generation[CONFIG_USB_DEVICE_GS_USB_MAX_CHANNELS];
 static atomic_t yfa_fc_worker_started;
 
 static void yfa_fc_tx_callback(const struct device *dev, int error, void *user_data)
